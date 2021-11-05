@@ -1,0 +1,14 @@
+#DUMMY API SERVER
+
+logger:
+  level: INFO
+
+trace:
+  enable: true
+
+metrics:
+  enable: true
+
+server:
+  endpoint: tcp://127.0.0.1:9001
+  graceful-shutdown: 30s
