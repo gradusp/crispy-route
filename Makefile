@@ -34,12 +34,15 @@ endif
 # install linter tool
 .PHONY: install-linter
 install-linter:
-ifneq ($(GOLANGCI_CUR_VERSION), $(GOLANGCI_LATEST_VERSION))
+	$(info GOLANGCI-LATEST-VERSION=$(GOLANGCI_LATEST_VERSION))
+ifeq ($(filter $(GOLANGCI_CUR_VERSION), $(GOLANGCI_LATEST_VERSION)),)
 	$(info Installing GOLANGCI-LINT $(GOLANGCI_LATEST_VERSION)...)
 	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s $(GOLANGCI_LATEST_VERSION)
+	@chmod +x $(GOLANGCI_BIN)
 else
 	@echo "GOLANGCI-LINT is need not install"
 endif
+
 
 # run full lint like in pipeline
 .PHONY: lint
