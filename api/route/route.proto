@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package crispy.route;
+option go_package = "/route";
+
+//import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/api/annotations.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Route public API";
+    version: "2.0";
+    contact: {
+      name: "Pavel Fiskovich";
+      url: "https://blog.bullgare.com/2020/07/complete-list-of-swagger-options-to-protobuf-file";
+    };
+  };
+  schemes: [HTTP];
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+//RouteService сервис для добавления и удаления роутов
+service RouteService {
+  //AddRoute добавить роут
+  rpc AddRoute(AddRouteRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/v2/route/add"
+      body: "*"
+    };
+  }
+
+  //RemoveRoute удалить роут
+  rpc RemoveRoute(RemoveRouteRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/v2/route/remove"
+      body: "*"
+    };
+  }
+
+  //GetState вернуть все роуты
+  rpc GetState(google.protobuf.Empty) returns (GetStateResponse) {
+    option (google.api.http) = {
+      get: "/v2/route/state"
+    };
+  }
+}
+
+
+//AddRouteRequest добавить роут
+message RemoveRouteRequest {
+  string hcDestIP = 1;
+  string hcTunDestIP = 2;
+}
+
+//AddRouteRequest добавить роут
+message AddRouteRequest {
+  string hcDestIP = 1;
+  string hcTunDestIP = 2;
+}
+
+//GetStateResponse выдаем все роуты
+message GetStateResponse {
+  //routes список роутов
+  repeated string routes = 1;
+}
+
