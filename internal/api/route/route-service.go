@@ -36,7 +36,7 @@ import (
 
 //GetSwaggerDocs get swagger spec docs
 func GetSwaggerDocs() (*server.SwaggerSpec, error) {
-	const api = "dummy/GetSwaggerDocs"
+	const api = "route/GetSwaggerDocs"
 	ret := new(server.SwaggerSpec)
 	err := json.Unmarshal(rawSwagger, ret)
 	return ret, errors.Wrap(err, api)
@@ -99,6 +99,15 @@ func (srv *routeService) RegisterProxyGW(ctx context.Context, mux *grpcRt.ServeM
 
 //AddRoute impl service
 func (srv *routeService) AddRoute(ctx context.Context, req *route.AddRouteRequest) (resp *emptypb.Empty, err error) {
+	var leave func()
+	if leave, err = srv.enter(ctx); err != nil {
+		return
+	}
+	defer func() {
+		leave()
+		err = srv.correctError(err)
+	}()
+
 	hcDestIP := req.GetHcDestIP()
 	hcTunDestIP := req.GetHcTunDestIP()
 
@@ -108,14 +117,6 @@ func (srv *routeService) AddRoute(ctx context.Context, req *route.AddRouteReques
 		attribute.String("hcTunDestIP", hcTunDestIP),
 	)
 
-	var leave func()
-	if leave, err = srv.enter(ctx); err != nil {
-		return
-	}
-	defer func() {
-		leave()
-		err = srv.correctError(err)
-	}()
 	resp = new(emptypb.Empty)
 	var (
 		hcTunDestNetIP net.IP
@@ -123,16 +124,16 @@ func (srv *routeService) AddRoute(ctx context.Context, req *route.AddRouteReques
 		hcDestNetIPNet *net.IPNet
 	)
 	if hcTunDestNetIP, _, err = net.ParseCIDR(hcTunDestIP + mask32); err != nil {
-		err = status.Errorf(codes.InvalidArgument, "'hcTunDestIP': %v",
-			errors.Wrap(err, "net.ParseCIDR"),
+		err = status.Errorf(codes.InvalidArgument, "bad 'hcTunDestIP': %v",
+			errors.WithMessagef(err, "net.ParseCIDR('%s')", hcTunDestIP+mask32),
 		)
 		return
 	}
 	span.SetAttributes(attribute.Stringer("hcTunDestNetIP", hcTunDestNetIP))
 
 	if hcDestNetIP, hcDestNetIPNet, err = net.ParseCIDR(hcDestIP + mask32); err != nil {
-		err = status.Errorf(codes.InvalidArgument, "'hcDestIP': %v",
-			errors.Wrap(err, "net.ParseCIDR"),
+		err = status.Errorf(codes.InvalidArgument, "bad 'hcDestIP': %v",
+			errors.WithMessagef(err, "net.ParseCIDR('%s')", hcDestIP+mask32),
 		)
 		return
 	}
@@ -151,7 +152,7 @@ func (srv *routeService) AddRoute(ctx context.Context, req *route.AddRouteReques
 	))
 	var isRouteExist bool
 	if isRouteExist, err = srv.checkRouteExist(ctx, hcDestNetIP.String(), tunnelName); err != nil {
-		err = errors.Wrap(err, "checkRouteExist")
+		err = errors.WithMessage(err, "check-route-exist")
 		return
 	}
 	if isRouteExist {
@@ -160,7 +161,7 @@ func (srv *routeService) AddRoute(ctx context.Context, req *route.AddRouteReques
 	}
 	var lnk netlink.Link
 	if lnk, err = netlink.LinkByName(tunnelName); err != nil {
-		err = errors.Wrapf(err, "netlink.LinkByName(%s)", tunnelName)
+		err = errors.WithMessagef(err, "netlink/LinkByName '%s'", tunnelName)
 		return
 	}
 	rt := netlink.Route{
@@ -168,7 +169,7 @@ func (srv *routeService) AddRoute(ctx context.Context, req *route.AddRouteReques
 		Dst:       hcDestNetIPNet,
 		Table:     table,
 	}
-	srv.addSpanDbgEvent(ctx, span, "netlink.RouteAdd",
+	srv.addSpanDbgEvent(ctx, span, "netlink/RouteAdd",
 		trace.WithAttributes(
 			attribute.Int("LinkIndex", rt.LinkIndex),
 			attribute.Stringer("Dst", rt.Dst),
@@ -176,22 +177,31 @@ func (srv *routeService) AddRoute(ctx context.Context, req *route.AddRouteReques
 		),
 	)
 	if err = netlink.RouteAdd(&rt); err != nil {
-		err = errors.Wrap(err, "netlink.RouteAdd")
+		err = errors.Wrap(err, "netlink/RouteAdd")
 		return
 	}
-	srv.addSpanDbgEvent(ctx, span, "newRpFilter",
+	srv.addSpanDbgEvent(ctx, span, "new-rp-filter",
 		trace.WithAttributes(
-			attribute.String("tunnelName", tunnelName),
+			attribute.String("tunnel-name", tunnelName),
 		),
 	)
 	if err = srv.newRpFilter(ctx, tunnelName); err != nil {
-		err = errors.Wrapf(err, "newRpFilter(%s)", tunnelName)
+		err = errors.Wrapf(err, "new-rp-filter '%s'", tunnelName)
 	}
-	return //nolint:nakedret
+	return resp, err
 }
 
 //RemoveRoute impl service
 func (srv *routeService) RemoveRoute(ctx context.Context, req *route.RemoveRouteRequest) (resp *emptypb.Empty, err error) {
+	var leave func()
+	if leave, err = srv.enter(ctx); err != nil {
+		return
+	}
+	defer func() {
+		leave()
+		err = srv.correctError(err)
+	}()
+
 	hcDestIP := req.GetHcDestIP()
 	hcTunDestIP := req.GetHcTunDestIP()
 
@@ -201,14 +211,6 @@ func (srv *routeService) RemoveRoute(ctx context.Context, req *route.RemoveRoute
 		attribute.String("hcTunDestIP", hcTunDestIP),
 	)
 
-	var leave func()
-	if leave, err = srv.enter(ctx); err != nil {
-		return
-	}
-	defer func() {
-		leave()
-		err = srv.correctError(err)
-	}()
 	resp = new(emptypb.Empty)
 	var (
 		hcTunDestNetIP net.IP
@@ -216,16 +218,16 @@ func (srv *routeService) RemoveRoute(ctx context.Context, req *route.RemoveRoute
 	)
 
 	if hcTunDestNetIP, _, err = net.ParseCIDR(hcTunDestIP + mask32); err != nil {
-		err = status.Errorf(codes.InvalidArgument, "'hcTunDestIP': %v",
-			errors.Wrap(err, "net.ParseCIDR"),
+		err = status.Errorf(codes.InvalidArgument, "bad 'hcTunDestIP': %v",
+			errors.WithMessagef(err, "net.ParseCIDR('%s')", hcTunDestIP+mask32),
 		)
 		return
 	}
 	span.SetAttributes(attribute.Stringer("hcTunDestNetIP", hcTunDestNetIP))
 
 	if _, hcDestNetIPNet, err = net.ParseCIDR(hcDestIP + mask32); err != nil {
-		err = status.Errorf(codes.InvalidArgument, "'hcDestIP': %v",
-			errors.Wrap(err, "net.ParseCIDR"),
+		err = status.Errorf(codes.InvalidArgument, "bad 'hcDestIP': %v",
+			errors.WithMessagef(err, "net.ParseCIDR('%s')", hcDestIP+mask32),
 		)
 		return
 	}
@@ -245,7 +247,7 @@ func (srv *routeService) RemoveRoute(ctx context.Context, req *route.RemoveRoute
 		return
 	}
 	if !exist {
-		err = status.Errorf(codes.NotFound, "route for scope 'HcDestIP':%v, 'HcTunDestIP':%v is not found",
+		err = status.Errorf(codes.NotFound, "route for scope 'hcDestIP'='%v', 'hcTunDestIP'='%v' is not found",
 			hcDestIP, hcTunDestIP)
 		return
 	}
@@ -260,7 +262,7 @@ func (srv *routeService) RemoveRoute(ctx context.Context, req *route.RemoveRoute
 		Dst:       hcDestNetIPNet,
 		Table:     table,
 	}
-	srv.addSpanDbgEvent(ctx, span, "netlink.RouteDel",
+	srv.addSpanDbgEvent(ctx, span, "netlink/RouteDel",
 		trace.WithAttributes(
 			attribute.Int("LinkIndex", rt.LinkIndex),
 			attribute.Stringer("Dst", rt.Dst),
@@ -268,10 +270,10 @@ func (srv *routeService) RemoveRoute(ctx context.Context, req *route.RemoveRoute
 		),
 	)
 	if err = netlink.RouteDel(&rt); err != nil {
-		err = errors.Wrap(err, "netlink.RouteDel")
+		err = errors.Wrap(err, "netlink/RouteDel")
 		return
 	}
-	return //nolint:nakedret
+	return resp, err
 }
 
 //GetState impl service
@@ -282,8 +284,7 @@ func (srv *routeService) GetState(ctx context.Context, _ *emptypb.Empty) (resp *
 	)
 
 	var leave func()
-	leave, err = srv.enter(ctx)
-	if err != nil {
+	if leave, err = srv.enter(ctx); err != nil {
 		return
 	}
 	defer func() {
@@ -294,7 +295,7 @@ func (srv *routeService) GetState(ctx context.Context, _ *emptypb.Empty) (resp *
 	outBuf := bytes.NewBuffer(nil)
 	var ec int
 	if ec, err = srv.execExternal(ctx, outBuf, cmd, args); err != nil {
-		err = errors.Wrapf(err, "exec-of:%s %s", cmd, args)
+		err = errors.WithMessagef(err, "exec-of:%s %s", cmd, args)
 		return
 	}
 	if ec != 0 {
@@ -308,13 +309,13 @@ func (srv *routeService) GetState(ctx context.Context, _ *emptypb.Empty) (resp *
 }
 
 func (srv *routeService) checkRouteExist(ctx context.Context, destIP string, tunnelName string) (bool, error) {
-	cmd := "ip"
+	const cmd = "ip"
 	args := fmt.Sprintf("route show %s table %s", destIP, tunnelName)
 	out := bytes.NewBuffer(nil)
 	ec, err := srv.execExternal(ctx, out, cmd, args)
 	var isExist bool
 	if err != nil {
-		err = errors.Wrapf(err, "exec-of: %s %s", cmd, args)
+		err = errors.WithMessagef(err, "exec-of: %s %s", cmd, args)
 	} else {
 		switch ec {
 		case 0:
@@ -355,11 +356,11 @@ func (srv *routeService) parseRoutes(raw []byte) []string {
 }
 
 func (srv *routeService) newRpFilter(ctx context.Context, tunnelName string) error {
-	cmd := "sysctl"
+	const cmd = "sysctl"
 	args := fmt.Sprintf("-w net.ipv4.conf.%s.rp_filter=0", tunnelName)
 	ec, err := srv.execExternal(ctx, nil, cmd, args)
 	if err != nil {
-		return errors.Wrapf(err, "exec-of:%s %s", cmd, args)
+		return errors.WithMessagef(err, "exec-of:%s %s", cmd, args)
 	}
 	if ec != 0 {
 		return errors.Errorf("exec-of:%s %s -> exit-code(%v)", cmd, args, ec)

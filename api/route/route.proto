@@ -15,7 +15,7 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
     version: "2.0";
     contact: {
       name: "Pavel Fiskovich";
-      url: "https://blog.bullgare.com/2020/07/complete-list-of-swagger-options-to-protobuf-file";
+      url: "https://khannz.medium.com/about";
     };
   };
   schemes: [HTTP];

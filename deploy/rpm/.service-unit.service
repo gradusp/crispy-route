@@ -1,0 +1,20 @@
+[Unit]
+Description=<project> <app> service
+ConditionPathExists=/opt/<project>/<service>
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+LimitNOFILE=1024
+Restart=on-failure
+RestartSec=10
+WorkingDirectory=/opt/<project>
+ExecStart=/opt/<project>/<service> -config=<service>.yaml
+KillSignal=SIGINT
+SendSIGKILL=no
+PermissionsStartOnly=true
+
+[Install]
+WantedBy=multi-user.target

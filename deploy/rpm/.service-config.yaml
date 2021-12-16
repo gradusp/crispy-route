@@ -1,0 +1,10 @@
+# ---
+
+trace:
+  enable: false
+
+metrics:
+  enable: true
+
+server:
+  endpoint: unix:///var/run/<service>.sock
