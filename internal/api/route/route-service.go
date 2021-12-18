@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	intNet "github.com/gradusp/crispy-route/internal/pkg/net"
 	"github.com/gradusp/crispy-route/pkg/route"
@@ -68,11 +69,16 @@ const (
 	tunPart  = `dev\s+tun(\d+)`
 	ipAndTun = `(?mi)(?:\s|^)(` + ip4parts + `)\s+` + tunPart + `(?:\s|$)`
 
+	devPart    = `dev\s+(\w+)`
+	tabPart    = `table\s+(\w+)`
+	ipDevTable = `(?mi)(?:\s|^)(` + ip4parts + `)\s+` + devPart + `\s+` + tabPart + `(?:\s|$)`
+
 	mask32 = "/32"
 )
 
 var (
 	reIPAndTun = regexp.MustCompile(ipAndTun)
+	reRoute    = regexp.MustCompile(ipDevTable)
 )
 
 type routeService struct {
@@ -150,18 +156,18 @@ func (srv *routeService) AddRoute(ctx context.Context, req *route.AddRouteReques
 		attribute.Stringer("hcDestNetIP", hcDestNetIP),
 		attribute.String("tunnelName", tunnelName),
 	))
-	var isRouteExist bool
-	if isRouteExist, err = srv.checkRouteExist(ctx, hcDestNetIP.String(), tunnelName); err != nil {
-		err = errors.WithMessage(err, "check-route-exist")
-		return
-	}
-	if isRouteExist {
-		err = status.Error(codes.AlreadyExists, "tunnel already exist")
-		return //Not exist
-	}
 	var lnk netlink.Link
 	if lnk, err = netlink.LinkByName(tunnelName); err != nil {
-		err = errors.WithMessagef(err, "netlink/LinkByName '%s'", tunnelName)
+		var nf netlink.LinkNotFoundError
+		if errors.As(err, &nf) {
+			err = errors.Errorf("tunnel '%s(%s)' is not found", tunnelName, hcTunDestIP)
+		} else {
+			err = errors.WithMessagef(err, "netlink/LinkByName '%s'", tunnelName)
+		}
+		return
+	}
+	if _, ok := lnk.(*netlink.Iptun); !ok {
+		err = errors.Errorf("tunnel '%s(%s)' is not 'ipip' type", tunnelName, hcTunDestIP)
 		return
 	}
 	rt := netlink.Route{
@@ -171,22 +177,19 @@ func (srv *routeService) AddRoute(ctx context.Context, req *route.AddRouteReques
 	}
 	srv.addSpanDbgEvent(ctx, span, "netlink/RouteAdd",
 		trace.WithAttributes(
-			attribute.Int("LinkIndex", rt.LinkIndex),
-			attribute.Stringer("Dst", rt.Dst),
-			attribute.Int("Table", rt.Table),
+			attribute.Int("link-index", rt.LinkIndex),
+			attribute.Stringer("dest", rt.Dst),
+			attribute.Int("table", rt.Table),
 		),
 	)
 	if err = netlink.RouteAdd(&rt); err != nil {
-		err = errors.Wrap(err, "netlink/RouteAdd")
+		var en syscall.Errno
+		if errors.As(err, &en) && en == syscall.EEXIST {
+			err = status.Errorf(codes.NotFound, "route '%s' -> '%s' already exist", hcDestNetIP, hcTunDestNetIP)
+		} else {
+			err = errors.Wrap(err, "netlink/RouteAdd")
+		}
 		return
-	}
-	srv.addSpanDbgEvent(ctx, span, "new-rp-filter",
-		trace.WithAttributes(
-			attribute.String("tunnel-name", tunnelName),
-		),
-	)
-	if err = srv.newRpFilter(ctx, tunnelName); err != nil {
-		err = errors.Wrapf(err, "new-rp-filter '%s'", tunnelName)
 	}
 	return resp, err
 }
@@ -240,21 +243,19 @@ func (srv *routeService) RemoveRoute(ctx context.Context, req *route.RemoveRoute
 			attribute.Int("table", table),
 		),
 	)
-	var exist bool
-	exist, err = srv.checkRouteExist(ctx, hcDestNetIPNet.IP.String(), fmt.Sprintf("%v", table))
-	if err != nil {
-		err = errors.Wrapf(err, "checkRouteExist")
-		return
-	}
-	if !exist {
-		err = status.Errorf(codes.NotFound, "route for scope 'hcDestIP'='%v', 'hcTunDestIP'='%v' is not found",
-			hcDestIP, hcTunDestIP)
-		return
-	}
 	tunnelName := fmt.Sprintf("tun%v", table)
 	var lnk netlink.Link
 	if lnk, err = netlink.LinkByName(tunnelName); err != nil {
-		err = errors.Wrapf(err, "netlink.LinkByName(%s)", tunnelName)
+		var nf netlink.LinkNotFoundError
+		if errors.As(err, &nf) {
+			err = errors.Errorf("tunnel '%s(%s)' is not found", tunnelName, hcTunDestIP)
+		} else {
+			err = errors.WithMessagef(err, "netlink/LinkByName '%s'", tunnelName)
+		}
+		return
+	}
+	if _, ok := lnk.(*netlink.Iptun); !ok {
+		err = errors.Errorf("tunnel '%s(%s)' is not 'ipip' type", tunnelName, hcTunDestIP)
 		return
 	}
 	rt := netlink.Route{
@@ -264,14 +265,18 @@ func (srv *routeService) RemoveRoute(ctx context.Context, req *route.RemoveRoute
 	}
 	srv.addSpanDbgEvent(ctx, span, "netlink/RouteDel",
 		trace.WithAttributes(
-			attribute.Int("LinkIndex", rt.LinkIndex),
-			attribute.Stringer("Dst", rt.Dst),
-			attribute.Int("Table", rt.Table),
+			attribute.Int("link-index", rt.LinkIndex),
+			attribute.Stringer("dest", rt.Dst),
+			attribute.Int("table", rt.Table),
 		),
 	)
 	if err = netlink.RouteDel(&rt); err != nil {
-		err = errors.Wrap(err, "netlink/RouteDel")
-		return
+		var en syscall.Errno
+		if errors.As(err, &en) && en == syscall.ESRCH {
+			err = status.Errorf(codes.NotFound, "route '%s' -> '%s' is not found", hcDestIP, hcDestNetIPNet)
+		} else {
+			err = errors.Wrap(err, "netlink/RouteDel")
+		}
 	}
 	return resp, err
 }
@@ -292,48 +297,76 @@ func (srv *routeService) GetState(ctx context.Context, _ *emptypb.Empty) (resp *
 		err = srv.correctError(err)
 	}()
 
-	outBuf := bytes.NewBuffer(nil)
-	var ec int
-	if ec, err = srv.execExternal(ctx, outBuf, cmd, args); err != nil {
-		err = errors.WithMessagef(err, "exec-of:%s %s", cmd, args)
+	devices := make(map[string]net.IP)
+	var links []netlink.Link
+	if links, err = netlink.LinkList(); err != nil {
+		err = errors.Wrap(err, "netlink/LinkList")
 		return
 	}
-	if ec != 0 {
-		err = errors.Errorf("exec-of:%s %s -> exit-code(%d)", cmd, args, ec)
-		return
-	}
-	resp = &route.GetStateResponse{
-		Routes: srv.parseRoutes(outBuf.Bytes()),
-	}
-	return
-}
 
-func (srv *routeService) checkRouteExist(ctx context.Context, destIP string, tunnelName string) (bool, error) {
-	const cmd = "ip"
-	args := fmt.Sprintf("route show %s table %s", destIP, tunnelName)
-	out := bytes.NewBuffer(nil)
-	ec, err := srv.execExternal(ctx, out, cmd, args)
-	var isExist bool
-	if err != nil {
-		err = errors.WithMessagef(err, "exec-of: %s %s", cmd, args)
-	} else {
-		switch ec {
-		case 0:
-			routes := srv.parseRoutes(out.Bytes())
-			for _, r := range routes {
-				isExist = strings.Contains(r, destIP) &&
-					strings.Contains(r, tunnelName)
-				if isExist {
-					break
-				}
-			}
-			fallthrough
-		case 2:
-		default:
-			err = errors.Errorf("exec-of: %s %s -> exit-code(%v)", cmd, args, ec)
+	for _, l := range links {
+		switch tun := l.(type) {
+		case *netlink.Iptun:
+			devices[tun.Name] = tun.Remote
 		}
 	}
+
+	resp = new(route.GetStateResponse)
+	outBuf := bytes.NewBuffer(nil)
+	var ec int
+	if ec, err = srv.execExternal(ctx, outBuf, cmd, strings.Split(args, " ")...); err != nil {
+		err = errors.WithMessagef(err, "exec-of '%s %s'", cmd, args)
+	}
+	if ec != 0 {
+		err = errors.Errorf("exec-of '%s %s' -> exit code %d", cmd, args, ec)
+		return
+	}
+	err = srv.parseRoutes2(outBuf.Bytes(), func(ip net.IP, dev, table string) error {
+		if ipTun := devices[dev]; ipTun != nil {
+			resp.Routes = append(resp.Routes, &route.Route{
+				HcDestIP:    ip.String(),
+				HcTunDestIP: ipTun.String(),
+				Dev:         dev,
+				Table:       table,
+			})
+		}
+		return nil
+	})
+	return resp, err
+}
+
+/*//TODO: Пока оставим этот код а там поглядим
+func (srv *routeService) checkRouteExist(ctx context.Context, destIP net.IP, tunnel int) (bool, error) {
+	const cmd = "ip"
+	args := fmt.Sprintf("route show %s table %v", destIP, tunnel)
+	out := bytes.NewBuffer(nil)
+	ec, err := srv.execExternal(ctx, out, cmd, strings.Split(args, " ")...)
+	var isExist bool
+	if err != nil {
+		err = errors.WithMessagef(err, "exec-of '%s %s'", cmd, args)
+	} else if ec == 0 {
+		isExist = reIPAndTun.Match(out.Bytes())
+	} else {
+		err = errors.Errorf("exec-of '%s %s' -> exit code %v", cmd, args, ec)
+	}
 	return isExist, err
+}
+*/
+
+type parecedRouteCb = func(ip net.IP, dev, table string) error
+
+func (srv *routeService) parseRoutes2(raw []byte, cb parecedRouteCb) error {
+	matched := reRoute.FindAllStringSubmatch(string(raw), -1)
+	for _, items := range matched {
+		var ip net.IP
+		if len(items) >= 4 && (&ip).UnmarshalText([]byte(items[1])) == nil {
+			dev, tab := items[2], items[3]
+			if err := cb(ip, dev, tab); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (srv *routeService) parseRoutes(raw []byte) []string {
@@ -353,19 +386,6 @@ func (srv *routeService) parseRoutes(raw []byte) []string {
 		return strings.EqualFold(res[i], res[j])
 	})
 	return res
-}
-
-func (srv *routeService) newRpFilter(ctx context.Context, tunnelName string) error {
-	const cmd = "sysctl"
-	args := fmt.Sprintf("-w net.ipv4.conf.%s.rp_filter=0", tunnelName)
-	ec, err := srv.execExternal(ctx, nil, cmd, args)
-	if err != nil {
-		return errors.WithMessagef(err, "exec-of:%s %s", cmd, args)
-	}
-	if ec != 0 {
-		return errors.Errorf("exec-of:%s %s -> exit-code(%v)", cmd, args, ec)
-	}
-	return nil
 }
 
 func (srv *routeService) correctError(err error) error {
@@ -415,6 +435,9 @@ func (srv *routeService) execExternal(ctx context.Context, output io.Writer, com
 	case err = <-ch:
 		if err == nil {
 			exitCode = cmd.ProcessState.ExitCode()
+		} else if e := new(*exec.ExitError); errors.As(err, e) {
+			exitCode = (*e).ExitCode()
+			err = nil
 		}
 	}
 	if err == context.Canceled || err == context.DeadlineExceeded {

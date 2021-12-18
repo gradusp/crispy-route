@@ -62,9 +62,19 @@ message AddRouteRequest {
   string hcTunDestIP = 2;
 }
 
+//Route IP route
+message Route {
+  string hcDestIP = 1;
+  string hcTunDestIP = 2;
+  //dev net-link device
+  string dev = 3;
+  //table route table
+  string table = 4;
+}
+
 //GetStateResponse выдаем все роуты
 message GetStateResponse {
   //routes список роутов
-  repeated string routes = 1;
+  repeated Route routes = 1;
 }
 
