@@ -1,0 +1,60 @@
+# nfpm example config file
+#
+# check https://nfpm.goreleaser.com/configuration for detailed usage
+#
+name: "<name>"
+arch: amd64
+platform: linux
+version: "<version>"
+##section: "default"
+#priority: "extra"
+#replaces:
+#- foobar
+#provides:
+#- sber
+#depends:
+#- foo
+#- bar
+#recommends:
+#- whatever
+#suggests:
+#- something-else
+#conflicts:
+#- not-foo
+#- not-bar
+maintainer: "Pavel Fiskovich"
+description: <project> <app> service
+vendor: Sber
+#homepage: "http://example.com"
+license: "MIT?"
+#changelog: "changelog.yaml"
+#depends:
+#- ipvsadm
+rpm:
+  arch: "x86_64"
+overrides:
+  rpm:
+    contents:
+      - dst:  /opt/<project>
+        type: dir
+
+      - src: "<artifacts>/<service>"
+        dst: /opt/<project>/<service>
+
+      - src:  "<artifacts>/<service>.yaml"
+        dst:  /opt/<project>/<service>.yaml
+        type: config
+
+      - src: "<artifacts>/<service>.service"
+        dst: /lib/systemd/system/<service>.service
+
+      - dst:  /var/run/<service>.sock
+        type: ghost
+        file_info:
+          mode: 776
+
+    scripts:
+      preinstall:  "<artifacts>/preinstall.sh"
+      postinstall: "<artifacts>/postinstall.sh"
+      preremove:   "<artifacts>/preremove.sh"
+      postremove:  "<artifacts>/postremove.sh"

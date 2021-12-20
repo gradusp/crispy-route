@@ -5,7 +5,7 @@
     "version": "2.0",
     "contact": {
       "name": "Pavel Fiskovich",
-      "url": "https://blog.bullgare.com/2020/07/complete-list-of-swagger-options-to-protobuf-file"
+      "url": "https://khannz.medium.com/about"
     }
   },
   "tags": [
@@ -141,7 +141,7 @@
         "routes": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/routeRoute"
           },
           "title": "routes список роутов"
         }
@@ -159,6 +159,26 @@
         }
       },
       "title": "AddRouteRequest добавить роут"
+    },
+    "routeRoute": {
+      "type": "object",
+      "properties": {
+        "hcDestIP": {
+          "type": "string"
+        },
+        "hcTunDestIP": {
+          "type": "string"
+        },
+        "dev": {
+          "type": "string",
+          "title": "dev net-link device"
+        },
+        "table": {
+          "type": "string",
+          "title": "table route table"
+        }
+      },
+      "title": "Route IP route"
     },
     "rpcStatus": {
       "type": "object",
